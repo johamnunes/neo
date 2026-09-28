@@ -1,0 +1,61 @@
+/* Screenplay pages. Loaded on top of styles.css.
+   Courier, no first-line indent. The element lives on data-el. */
+
+#novo-roteiro {
+  background: none; border: 1px solid #3a3a3a; color: var(--muted);
+  border-radius: 6px; padding: 5px 12px; font-size: 12px;
+}
+#novo-roteiro:hover { color: var(--accent); border-color: var(--accent); }
+body.bright #novo-roteiro { color: #b4b4b4; border-color: #555; }
+
+#export-fountain {
+  background: none; border: none; color: var(--accent);
+  font-size: 12px; cursor: pointer; padding: 0 4px;
+}
+#export-fountain:hover { color: #ddd; }
+
+.book .b-roteiro {
+  position: absolute; left: 6px; bottom: 6px; z-index: 2;
+  font-size: 8px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: #1c1c1c; background: var(--accent); padding: 2px 4px; border-radius: 2px;
+}
+
+#roteiro-status {
+  cursor: default; color: var(--accent); max-width: 46vw;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#roteiro-status:hover { color: var(--accent); }
+
+body.roteiro .chapter-body {
+  font-family: "Courier New", Courier, monospace;
+  font-size: calc(12pt * var(--page-zoom, 1));
+  line-height: 1.15;
+}
+body.roteiro .chapter-body p { text-indent: 0; margin: 0 0 1em; }
+body.roteiro .chapter-body p[data-el="cena"] {
+  font-weight: 700; text-transform: uppercase; margin-top: 1.4em;
+}
+body.roteiro .chapter-body p[data-el="personagem"] {
+  text-transform: uppercase; text-align: center; margin: 1em 0 0;
+}
+body.roteiro .chapter-body p[data-el="parentese"] {
+  text-align: center; font-style: italic; margin: 0;
+}
+body.roteiro .chapter-body p[data-el="fala"] {
+  margin: 0 18% 1em;
+}
+body.roteiro .chapter-body p[data-el="transicao"] {
+  text-transform: uppercase; text-align: right; margin-top: 1em;
+}
+body.roteiro .chapter-body p[data-el="cena"]:not(:focus):has(> br:only-child)::before,
+body.roteiro .chapter-body p[data-el="acao"]:not(:focus):has(> br:only-child)::before,
+body.roteiro .chapter-body p[data-el="personagem"]:not(:focus):has(> br:only-child)::before,
+body.roteiro .chapter-body p[data-el="fala"]:not(:focus):has(> br:only-child)::before,
+body.roteiro .chapter-body p[data-el="transicao"]:not(:focus):has(> br:only-child)::before {
+  color: #b7b1a4; font-weight: 400; font-style: italic; text-transform: none;
+}
+body.roteiro .chapter-body p[data-el="cena"]:not(:focus):has(> br:only-child)::before { content: "INT. LUGAR \u2013 DIA"; }
+body.roteiro .chapter-body p[data-el="acao"]:not(:focus):has(> br:only-child)::before { content: "O que a gente v\u00ea\u2026"; }
+body.roteiro .chapter-body p[data-el="personagem"]:not(:focus):has(> br:only-child)::before { content: "PERSONAGEM"; }
+body.roteiro .chapter-body p[data-el="fala"]:not(:focus):has(> br:only-child)::before { content: "Fala\u2026"; }
+body.roteiro .chapter-body p[data-el="transicao"]:not(:focus):has(> br:only-child)::before { content: "CORTA PARA:"; }
