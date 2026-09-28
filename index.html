@@ -16,6 +16,7 @@
       <div class="shelf-header-right">
         <span id="author-chip" data-i18n-title title="Click to change your author name"></span>
         <button id="import-btn" data-i18n-title title="Import .docx, .txt, or .md manuscripts">&#8681; <span data-i18n>Import</span></button>
+        <button id="novo-roteiro" title="Começa um roteiro: cena, ação, personagem e fala">Novo roteiro</button>
         <button id="add-shelf-btn" data-i18n-title title="Add a shelf">+ <span data-i18n>Shelf</span></button>
       </div>
     </header>
@@ -114,6 +115,7 @@
         <div class="tab darlings" data-tab="darlings" data-i18n data-i18n-title title="Drag any selection here. It's saved, not gone.">Darlings</div>
       </div>
       <div id="counters">
+        <span id="roteiro-status" hidden></span>
         <span id="goal-counter" data-i18n-title title="Today's words — click for goals, sprints, and your progress chart"></span>
         <span id="pos-counter"></span>
         <span id="word-counter" data-i18n-title title="Click to cycle book / chapter word count"></span>
@@ -139,6 +141,7 @@
   <div id="hint" hidden></div>
 
   <script src="i18n.js"></script>
+  <script src="roteiro.js"></script>
   <script src="covers.js"></script>
   <script src="app.js"></script>
 </body>
