@@ -587,6 +587,12 @@ function bookTile(meta) {
     <div class="b-painting" hidden></div>
     <div class="b-progress" hidden><div></div></div>`;
   el.querySelector('.b-author').textContent = meta.author || '';
+  if (meta.kind === 'roteiro') {
+    const badge = document.createElement('span');
+    badge.className = 'b-roteiro';
+    badge.textContent = 'Roteiro';
+    el.appendChild(badge);
+  }
   dressTile(el, meta);
   el.querySelector('.b-painting').hidden = !(meta.coverArt && meta.coverArt.status === 'pending');
   el.querySelector('.b-refresh').onclick = async (e) => {
@@ -818,12 +824,20 @@ async function refreshCover(meta, el) {
   dressTile(el, live);
 }
 
-async function createBookOnShelf(shelf) {
-  const meta = await window.neo.createBook({ author: displayAuthor() });
+async function createBookOnShelf(shelf, kind) {
+  const roteiro = kind === 'roteiro';
+  const meta = await window.neo.createBook({
+    author: displayAuthor(),
+    // "Sem título" is the screenplay's own name; a novel still uses Untitled
+    title: roteiro ? 'Sem título' : undefined,
+    kind: roteiro ? 'roteiro' : undefined
+  });
   meta.tabNames = {
     notes: (library.tabDefaults && library.tabDefaults.notes) || 'Notes',
     outline: (library.tabDefaults && library.tabDefaults.outline) || 'Outline'
   };
+  // create() may omit kind; write it back so the folder reopens as a screenplay
+  if (roteiro) meta.kind = 'roteiro';
   await window.neo.writeBookMeta(meta.id, meta);
   shelf.bookIds.push(meta.id);
   await window.neo.writeLibrary(library);
@@ -1067,6 +1081,9 @@ async function openBook(bookId) {
 
   $('#bookshelf-view').hidden = true;
   $('#editor-view').hidden = false;
+  document.body.classList.toggle('roteiro', book.kind === 'roteiro');
+  if ($('#roteiro-status')) $('#roteiro-status').hidden = book.kind !== 'roteiro';
+  if ($('#export-fountain')) $('#export-fountain').hidden = book.kind !== 'roteiro';
   document.execCommand('defaultParagraphSeparator', false, 'p');
 
   $('#tp-title').textContent = isUntitled(book.title) ? '' : book.title;
@@ -1083,7 +1100,12 @@ async function openBook(bookId) {
 
   // Plotters land in the outline for a brand-new book
   const isNew = book.chapterOrder.length === 0;
-  if (isNew && library.writingStyle === 'plotter') {
+  if (isNew && book.kind === 'roteiro') {
+    switchTab('manuscript');
+    const chId = createChapterAt(0);
+    focusChapterStart(chId);
+    refreshRoteiroStatus(document.querySelector(`.chapter[data-id="${chId}"] p`));
+  } else if (isNew && library.writingStyle === 'plotter') {
     switchTab('outline');
   } else {
     switchTab('manuscript');
@@ -1102,7 +1124,13 @@ async function openBook(bookId) {
   }
 
   // the Enter hint shows once per library, ever
-  if (!library.hintShown) {
+  if (book.kind === 'roteiro') {
+    if (!library.roteiroHintShown) {
+      library.roteiroHintShown = true;
+      window.neo.writeLibrary(library);
+      setTimeout(() => toast('Enter avança o elemento · Tab muda o tipo · Shift+Enter continua a fala', 7000), 800);
+    }
+  } else if (!library.hintShown) {
     library.hintShown = true;
     window.neo.writeLibrary(library);
     setTimeout(() => toast(t('Enter twice = section break · three times = new chapter · {key} shows everything else', { key: KHELP }), 7000), 800);
@@ -1163,7 +1191,17 @@ function renderChapters() {
     body.className = 'chapter-body';
     body.contentEditable = 'true';
     body.spellcheck = false; // NEO runs its own spellcheck pass
-    body.innerHTML = chapterHTML[chId] || '<p><br></p>';
+    body.innerHTML = chapterHTML[chId] || (book.kind === 'roteiro' ? '<p data-el="cena"><br></p>' : '<p><br></p>');
+    if (book.kind === 'roteiro') {
+      // cap-off keeps the drop-cap ::first-letter rule from matching at all
+      body.classList.add('cap-off');
+      const ps = [...body.querySelectorAll('p')];
+      if (!ps.length) body.innerHTML = '<p data-el="cena"><br></p>';
+      [...body.querySelectorAll('p')].forEach((p, i) => {
+        if (p.classList.contains('scene-break')) return;
+        if (!window.NeoRoteiro || !window.NeoRoteiro.isType(p.dataset.el)) p.dataset.el = i === 0 ? 'cena' : 'acao';
+      });
+    }
     // older marks used a "?" that read as a broken image — normalize to the flag
     body.querySelectorAll('.ph-mark').forEach((m) => { m.textContent = '⚑'; });
     // heal the engine's style-junk spans left by past merges and splits
@@ -1230,6 +1268,14 @@ function wireChapterBody(body, chId) {
 
   body.addEventListener('input', () => {
     breakRun = 0; // fresh typing: ⌘Z belongs to the engine again
+    if (roteiroOn()) {
+      const p = caretBlock(body);
+      // "INT. " at the start of an action line is a scene heading
+      if (p && p.dataset.el === 'acao' && window.NeoRoteiro.looksLikeScene(p.textContent)) {
+        p.dataset.el = 'cena';
+        refreshRoteiroStatus(p);
+      }
+    }
     chapterHTML[chId] = captureBody(body);
     wordCache[chId] = null;
     scheduleChapterSave(chId);
@@ -1240,6 +1286,10 @@ function wireChapterBody(body, chId) {
   // paste without formatting
   body.addEventListener('paste', (e) => {
     e.preventDefault();
+    if (roteiroOn()) {
+      pasteRoteiro(body, chId, e.clipboardData.getData('text/plain') || '');
+      return;
+    }
     const html = e.clipboardData.getData('text/html');
     const text = e.clipboardData.getData('text/plain');
     if (html) {
@@ -1279,6 +1329,7 @@ function wireChapterBody(body, chId) {
         (s && !s.isCollapsed && (e.key.length === 1 || e.key === 'Enter'));
       if (destructive) healSelectionSeams(body);
     }
+    if (handleRoteiroKey(e, body, chId)) return;
     if (styleKeepScroll(e)) return;
     if (handlePoetry(e, body, chId)) return;
     if (poetryBackspace(e, body, chId)) return;
@@ -1638,6 +1689,259 @@ function splitChapterAt(body, chId, block, sel) {
   breakRun++;
 }
 
+function roteiroOn() {
+  return !!(window.NeoRoteiro && book && book.kind === 'roteiro');
+}
+
+function roteiroText(p) {
+  return ((p && p.textContent) || '').replace(/\u00a0/g, ' ');
+}
+
+function roteiroBlank(p) {
+  const text = roteiroText(p).trim();
+  if (!text) return true;
+  return p.dataset.el === 'parentese' && /^\(\s*\)$/.test(text);
+}
+
+function placeCaretInText(p, offset) {
+  const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+  let left = Math.max(0, offset);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (left <= node.textContent.length) {
+      placeCaret(node, left);
+      return;
+    }
+    left -= node.textContent.length;
+  }
+  placeCaret(p, 0);
+}
+
+function caretOffsetIn(p) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return 0;
+  const r = sel.getRangeAt(0);
+  const pre = document.createRange();
+  pre.selectNodeContents(p);
+  try { pre.setEnd(r.startContainer, r.startOffset); } catch { return 0; }
+  return pre.toString().length;
+}
+
+function refreshRoteiroStatus(p) {
+  const el = $('#roteiro-status');
+  if (!el) return;
+  if (!roteiroOn() || $('#editor-view').hidden) { el.hidden = true; return; }
+  el.hidden = false;
+  const type = (p && p.dataset && window.NeoRoteiro.isType(p.dataset.el)) ? p.dataset.el : 'cena';
+  el.textContent = window.NeoRoteiro.statusLine(type, !p || roteiroBlank(p));
+}
+
+// Tab, or Enter on an empty line: the paragraph changes element in place.
+function applyRoteiroType(p, type, keepCaret) {
+  const R = window.NeoRoteiro;
+  const keep = keepCaret ? caretOffsetIn(p) : 0;
+  let text = roteiroText(p);
+  if (p.dataset.el === 'parentese' && /^\(\s*\)$/.test(text.trim())) text = '';
+  p.dataset.el = type;
+  p.classList.remove('scene-break', 'poetry', 'ghost');
+  if (type === 'parentese') {
+    const inner = text.replace(/^\(+\s*/, '').replace(/\s*\)+$/, '').trim();
+    if (!inner) {
+      p.textContent = '()';
+      placeCaretInText(p, 1);
+      return;
+    }
+    text = '(' + inner + ')';
+    p.textContent = text;
+    placeCaretInText(p, Math.min(Math.max(keep || 1, 1), text.length - 1));
+    return;
+  }
+  if (R.isUpper(type)) text = R.upper(text);
+  if (!text.trim()) {
+    p.innerHTML = '<br>';
+    placeCaret(p, 0);
+    return;
+  }
+  p.textContent = text;
+  placeCaretInText(p, Math.min(keep, text.length));
+}
+
+function roteiroParagraph(type) {
+  const p = document.createElement('p');
+  p.dataset.el = type;
+  if (type === 'parentese') p.textContent = '()';
+  else p.innerHTML = '<br>';
+  return p;
+}
+
+function finishRoteiroEdit(body, chId, p) {
+  syncChapter(body, chId);
+  resetNativeUndo();
+  breakRun++;
+  refreshRoteiroStatus(p);
+}
+
+// Enter / Tab / Backspace while book.kind is roteiro. Novels never get here.
+function handleRoteiroKey(e, body, chId) {
+  if (!roteiroOn()) return false;
+  if (e.metaKey || e.ctrlKey || e.altKey) return false;
+  if (e.key !== 'Enter' && e.key !== 'Tab' && e.key !== 'Backspace' && e.key !== '(' && e.key !== ')') return false;
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return false;
+  if (e.key === 'Enter' && !sel.isCollapsed) document.execCommand('delete');
+  const block = caretBlock(body);
+  if (!block || block.classList.contains('scene-break')) return false;
+  const R = window.NeoRoteiro;
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    snapshotStructure('screenplay element');
+    applyRoteiroType(block, R.step(block.dataset.el, e.shiftKey ? 'untab' : 'tab'), true);
+    finishRoteiroEdit(body, chId, block);
+    return true;
+  }
+
+  if (e.key === '(' && block.dataset.el === 'fala' && roteiroBlank(block)) {
+    e.preventDefault();
+    snapshotStructure('screenplay element');
+    applyRoteiroType(block, 'parentese');
+    finishRoteiroEdit(body, chId, block);
+    return true;
+  }
+
+  if (e.key === ')' && block.dataset.el === 'parentese') {
+    const text = roteiroText(block);
+    if (text.slice(caretOffsetIn(block)).trim() === ')') {
+      e.preventDefault();
+      placeCaretInText(block, text.length);
+      return roteiroEnter(e, body, chId, block);
+    }
+    return false;
+  }
+
+  if (e.key === 'Enter') return roteiroEnter(e, body, chId, block);
+
+  if (e.key === 'Backspace') return roteiroBackspace(e, body, chId, block);
+  return false;
+}
+
+function roteiroEnter(e, body, chId, block) {
+  const R = window.NeoRoteiro;
+  e.preventDefault();
+  const type = R.isType(block.dataset.el) ? block.dataset.el : 'acao';
+  if (!e.shiftKey && roteiroBlank(block)) {
+    snapshotStructure('screenplay element');
+    applyRoteiroType(block, R.step(type, 'empty'));
+    finishRoteiroEdit(body, chId, block);
+    return true;
+  }
+  let text = roteiroText(block);
+  if (R.isUpper(type)) text = R.upper(text);
+  const off = Math.min(caretOffsetIn(block), text.length);
+  snapshotStructure('screenplay element');
+  if (off === 0 && text.trim()) {
+    const blank = roteiroParagraph(type);
+    blank.innerHTML = '<br>';
+    block.before(blank);
+    if (text !== roteiroText(block)) block.textContent = text;
+    finishRoteiroEdit(body, chId, block);
+    return true;
+  }
+  const atEnd = off >= text.length || (type === 'parentese' && text.slice(off).trim() === ')');
+  if (!atEnd) {
+    block.textContent = text.slice(0, off);
+    const rest = roteiroParagraph(type);
+    rest.textContent = text.slice(off);
+    block.after(rest);
+    placeCaretInText(rest, 0);
+    finishRoteiroEdit(body, chId, rest);
+    return true;
+  }
+  let from = type;
+  if (!e.shiftKey && type === 'acao') {
+    if (R.looksLikeTransition(text, true)) from = 'transicao';
+    else if (R.looksLikeCue(text)) from = 'personagem';
+  }
+  if (from !== type || text !== roteiroText(block)) {
+    block.dataset.el = from;
+    block.textContent = R.isUpper(from) ? R.upper(text) : text;
+  }
+  const next = roteiroParagraph(R.step(from, e.shiftKey ? 'shift' : 'enter'));
+  block.after(next);
+  if (next.dataset.el === 'parentese') placeCaretInText(next, 1);
+  else placeCaret(next, 0);
+  finishRoteiroEdit(body, chId, next);
+  return true;
+}
+
+function roteiroBackspace(e, body, chId, block) {
+  const sel = window.getSelection();
+  if (!sel.isCollapsed) return false;
+  const off = caretOffsetIn(block);
+  const text = roteiroText(block);
+  if (block.dataset.el === 'parentese' && off <= 1 && text.startsWith('(')) {
+    e.preventDefault();
+    snapshotStructure('screenplay element');
+    block.dataset.el = 'fala';
+    block.innerHTML = '<br>';
+    placeCaret(block, 0);
+    finishRoteiroEdit(body, chId, block);
+    return true;
+  }
+  if (off !== 0) return false;
+  const prev = block.previousElementSibling;
+  if (!prev || prev.tagName !== 'P') {
+    e.preventDefault();
+    return true;
+  }
+  e.preventDefault();
+  snapshotStructure('screenplay element');
+  if (roteiroBlank(block)) {
+    const prevOff = roteiroText(prev).length;
+    block.remove();
+    placeCaretInText(prev, prevOff);
+    finishRoteiroEdit(body, chId, prev);
+    return true;
+  }
+  if (roteiroBlank(prev)) {
+    prev.remove();
+    placeCaret(block, 0);
+    finishRoteiroEdit(body, chId, block);
+    return true;
+  }
+  const prevText = roteiroText(prev);
+  prev.textContent = prevText + text;
+  block.remove();
+  placeCaretInText(prev, prevText.length);
+  finishRoteiroEdit(body, chId, prev);
+  return true;
+}
+
+function pasteRoteiro(body, chId, text) {
+  const R = window.NeoRoteiro;
+  const raw = String(text || '').replace(/\r\n?/g, '\n');
+  if (!raw) return;
+  const blocks = raw.includes('\n') ? R.parseBody(raw) : [];
+  if (!blocks.length) {
+    document.execCommand('insertText', false, raw);
+    syncChapter(body, chId);
+    return;
+  }
+  const cur = caretBlock(body);
+  if (!cur) return;
+  snapshotStructure('screenplay element');
+  const holder = document.createElement('div');
+  holder.innerHTML = R.htmlFromBlocks(blocks);
+  const nodes = [...holder.children];
+  const replace = roteiroBlank(cur);
+  let anchor = cur;
+  nodes.forEach((n) => { anchor.after(n); anchor = n; });
+  if (replace) cur.remove();
+  const tail = nodes[nodes.length - 1];
+  placeCaretInText(tail, roteiroText(tail).length);
+  finishRoteiroEdit(body, chId, tail);
+}
+
 function handleEnter(e, body, chId) {
   if (e.key !== 'Enter' || e.shiftKey) return false;
   const sel = window.getSelection();
@@ -1992,9 +2296,20 @@ document.addEventListener('selectionchange', () => {
   if (caretP !== lastCaretPara) {
     if (lastCaretPara && lastCaretPara.isConnected) {
       try { lastCaretPara.normalize(); } catch { /* fine */ }
+      if (roteiroOn() && window.NeoRoteiro.isUpper(lastCaretPara.dataset.el)) {
+        const raw = lastCaretPara.textContent;
+        const up = window.NeoRoteiro.upper(raw);
+        if (raw.trim() && raw !== up) {
+          lastCaretPara.textContent = up;
+          const ch = lastCaretPara.closest('.chapter');
+          const bodyEl = lastCaretPara.closest('.chapter-body');
+          if (ch && bodyEl) syncChapter(bodyEl, ch.dataset.id);
+        }
+      }
     }
     lastCaretPara = caretP;
   }
+  if (roteiroOn()) refreshRoteiroStatus(caretP);
   // during a spellcheck pass, each chapter scans as the caret arrives
   if (spellOn && caretP) {
     const ch = caretP.closest('.chapter');
@@ -2009,7 +2324,8 @@ document.addEventListener('selectionchange', () => {
   const inFirst = caretP && caretP.parentElement &&
     caretP === caretP.parentElement.querySelector('p:not(.poetry)');
   const capBody = inFirst ? caretP.parentElement : null;
-  if (capBody !== capOffBody) {
+  // a screenplay page keeps cap-off for good: the drop-cap rule must not match
+  if (book.kind !== 'roteiro' && capBody !== capOffBody) {
     if (capOffBody && capOffBody.isConnected) capOffBody.classList.remove('cap-off');
     if (capBody) capBody.classList.add('cap-off');
     capOffBody = capBody;
@@ -2256,7 +2572,7 @@ document.addEventListener('keydown', (e) => {
 function createChapterAt(idx) {
   const chId = 'ch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
   book.chapterOrder.splice(idx, 0, chId);
-  chapterHTML[chId] = '<p><br></p>';
+  chapterHTML[chId] = (book && book.kind === 'roteiro') ? '<p data-el="cena"><br></p>' : '<p><br></p>';
   persistChapter(chId);
   saveMeta();
   renderChapters();
@@ -3647,6 +3963,9 @@ async function backToShelf() {
   undoStack = [];
   $('#editor-view').hidden = true;
   $('#bookshelf-view').hidden = false;
+  document.body.classList.remove('roteiro');
+  if ($('#roteiro-status')) $('#roteiro-status').hidden = true;
+  if ($('#export-fountain')) $('#export-fountain').hidden = true;
   renderShelves();
 }
 $('#back-to-shelf').onclick = backToShelf;
@@ -4069,6 +4388,33 @@ async function importBooks() {
 }
 
 $('#import-btn').onclick = importBooks;
+// The shelf page already has the button. The stylesheet and the Fountain
+// export control are added here so the chapter file stays the only format.
+if (!document.querySelector('link[href="roteiro.css"]')) {
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'roteiro.css';
+  document.head.appendChild(link);
+}
+if (!$('#export-fountain')) {
+  const b = document.createElement('button');
+  b.id = 'export-fountain';
+  b.type = 'button';
+  b.hidden = true;
+  b.title = 'Grava este roteiro em Fountain';
+  b.textContent = 'Exportar Fountain';
+  const status = $('#roteiro-status');
+  if (status) status.after(b);
+}
+const novoRoteiroBtn = $('#novo-roteiro');
+if (novoRoteiroBtn) {
+  novoRoteiroBtn.onclick = () => {
+    const shelf = shelvesFor(currentAuthor().id)[0] || library.shelves[0];
+    if (shelf) createBookOnShelf(shelf, 'roteiro');
+  };
+}
+const exportFountainBtn = $('#export-fountain');
+if (exportFountainBtn) exportFountainBtn.onclick = () => doExport('fountain');
 
 /* ================================================================== */
 /*  SPELLCHECK PASS + TYPEWRITER SCROLLING                             */
@@ -5463,6 +5809,19 @@ async function exportShelfAnthology(shelf) {
   if (saved) toast(t('Anthology of {n} works exported: {file}', { n: shelf.bookIds.length, file: saved.split('/').pop() }), 6000);
 }
 
+function buildFountain() {
+  const blocks = [];
+  for (const chId of book.chapterOrder) {
+    const el = document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`);
+    blocks.push(...window.NeoRoteiro.blocksFromHtml(el ? el.innerHTML : (chapterHTML[chId] || '')));
+  }
+  return window.NeoRoteiro.serialize({
+    title: isUntitled(book.title) ? '' : book.title,
+    author: book.author || '',
+    blocks
+  });
+}
+
 async function doExport(format) {
   if (!book) { toast(t('Open a book first')); return; }
   flushAllSaves();
@@ -5472,6 +5831,10 @@ async function doExport(format) {
   else if (format === 'epub') payload = { format, defaultName, zipEntries: await buildEpubEntries() };
   else if (format === 'txt') payload = { format, defaultName, content: buildTxt() };
   else if (format === 'md') payload = { format, defaultName, content: buildMd() };
+  else if (format === 'fountain') {
+    if (!roteiroOn()) { toast('Abra um roteiro para exportar Fountain.'); return; }
+    payload = { format, defaultName, content: buildFountain() };
+  }
   else payload = { format, defaultName, content: buildHtml(null, { cover: await exportCover(bookExportData()) }) };
   const saved = await window.neo.exportSave(payload);
   if (saved) toast(t('Exported: {file}', { file: saved.split('/').pop() }));
@@ -5680,6 +6043,10 @@ window.neo.onMenu(async (msg) => {
   if (msg.type === 'checkUpdate') checkForUpdate();
   if (msg.type === 'update') updateMessage(msg);
   if (msg.type === 'export') doExport(msg.format);
+  if (msg.type === 'newRoteiro') {
+    const shelf = shelvesFor(currentAuthor().id)[0] || library.shelves[0];
+    if (shelf) await createBookOnShelf(shelf, 'roteiro');
+  }
   if (msg.type === 'exportCustomChapterTitles') {
     library.exportCustomChapterTitles = msg.checked;
     await window.neo.writeLibrary(library);

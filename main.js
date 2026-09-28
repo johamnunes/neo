@@ -264,6 +264,9 @@ ipcMain.handle('book:create', (_e, meta) => {
     chapterOrder: [],
     tabNames: { notes: 'Notes', outline: 'Outline' } // shown translated (see tabName in app.js)
   };
+  // A screenplay is the same folder of files. The flag is the only
+  // difference; a novel never gets one, so old book.json files stay valid.
+  if (meta.kind === 'roteiro') book.kind = 'roteiro';
   writeJSON(path.join(dir, 'book.json'), book);
   fs.writeFileSync(path.join(dir, 'notes.html'), '');
   fs.writeFileSync(path.join(dir, 'outline.html'), '');
@@ -1192,6 +1195,7 @@ function buildMenu() {
             { label: 'PDF (.pdf)', click: () => sendToWindow({ type: 'export', format: 'pdf' }) },
             { label: 'Word (.docx)', click: () => sendToWindow({ type: 'export', format: 'docx' }) },
             { label: 'EPUB (.epub)', click: () => sendToWindow({ type: 'export', format: 'epub' }) },
+            { label: 'Fountain (.fountain)', click: () => sendToWindow({ type: 'export', format: 'fountain' }) },
             { type: 'separator' },
             {
               id: 'export-custom-chapter-titles',
@@ -1223,6 +1227,7 @@ function buildMenu() {
           ]
         },
         { type: 'separator' },
+        { label: 'Novo roteiro', click: () => sendToWindow({ type: 'newRoteiro' }) },
         {
           label: t('Import Manuscripts…'),
           accelerator: 'CmdOrCtrl+Shift+I',
