@@ -54,8 +54,8 @@ body.roteiro .chapter-body p[data-el="fala"]:not(:focus):has(> br:only-child)::b
 body.roteiro .chapter-body p[data-el="transicao"]:not(:focus):has(> br:only-child)::before {
   color: #b7b1a4; font-weight: 400; font-style: italic; text-transform: none;
 }
-body.roteiro .chapter-body p[data-el="cena"]:not(:focus):has(> br:only-child)::before { content: "INT. LUGAR – DIA"; }
-body.roteiro .chapter-body p[data-el="acao"]:not(:focus):has(> br:only-child)::before { content: "O que a gente vê…"; }
+body.roteiro .chapter-body p[data-el="cena"]:not(:focus):has(> br:only-child)::before { content: "INT. LUGAR \\0002013 DIA"; }
+body.roteiro .chapter-body p[data-el="acao"]:not(:focus):has(> br:only-child)::before { content: "O que a gente v\\0000ea\\002026"; }
 body.roteiro .chapter-body p[data-el="personagem"]:not(:focus):has(> br:only-child)::before { content: "PERSONAGEM"; }
-body.roteiro .chapter-body p[data-el="fala"]:not(:focus):has(> br:only-child)::before { content: "Fala…"; }
+body.roteiro .chapter-body p[data-el="fala"]:not(:focus):has(> br:only-child)::before { content: "Fala\\002026"; }
 body.roteiro .chapter-body p[data-el="transicao"]:not(:focus):has(> br:only-child)::before { content: "CORTA PARA:"; }
